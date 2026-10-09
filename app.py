@@ -39,7 +39,7 @@ if uploaded_file:
             }
 
             payload = {
-                "model": "zai-org/GLM-4.5V:baseten",
+               "model": "zai-org/GLM-4.5V:novita",
                 "messages": [
                     {
                         "role": "user",
