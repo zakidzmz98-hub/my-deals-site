@@ -11,32 +11,29 @@ st.set_page_config(
     layout="centered"
 )
 
-# --- تحسين التمرير بالماوس وإلغاء العوائق ---
+# --- تحسين التمرير بالماوس وإلغاء قيود الحاوية ---
 st.markdown("""
     <style>
-    /* تمكين التمرير بالماوس بسلاسة على كامل الصفحة */
-    html, body, [data-testid="stAppViewContainer"] {
+    html, body, [data-testid="stAppViewContainer"], [data-testid="stHeader"] {
         overflow-y: auto !important;
-        scroll-behavior: smooth;
+        scroll-behavior: smooth !important;
     }
-    
-    /* إزالة الحاويات المزدوجة التي تمنع تمرير العجلة */
+
     [data-testid="stMainBlockContainer"] {
         max-width: 800px;
         padding-top: 2rem;
         padding-bottom: 5rem;
     }
 
-    /* تحسين شكل شريط التمرير للماوس */
     ::-webkit-scrollbar {
-        width: 8px;
+        width: 10px;
     }
     ::-webkit-scrollbar-track {
         background: #f1f1f1;
     }
     ::-webkit-scrollbar-thumb {
         background: #888;
-        border-radius: 4px;
+        border-radius: 5px;
     }
     ::-webkit-scrollbar-thumb:hover {
         background: #555;
@@ -60,7 +57,7 @@ if uploaded_file is not None:
         if st.button("🌐 ترجمة إلى العربية", type="primary"):
             api_key = st.secrets["GEMINI_API_KEY"]
 
-            # تصغير أبعاد الصورة لضمان السرعة وعدم تجاوز مهلة الشبكة
+            # تصغير أبعاد الصورة لسرعة الأداء
             max_size = (800, 800)
             image_resized = image.copy()
             image_resized.thumbnail(max_size, Image.Resampling.LANCZOS)
@@ -109,11 +106,12 @@ if uploaded_file is not None:
                     json=payload,
                     timeout=60,
                 )
+
             if response.ok:
                 result = response.json()
                 translation = ""
 
-                # 1. الاستخراج من خطوات Interactions API (steps -> model_output)
+                # 1. الاستخراج من steps (طريقة Interactions API)
                 if "steps" in result and isinstance(result["steps"], list):
                     for step in result["steps"]:
                         if step.get("type") == "model_output" and "content" in step:
@@ -121,11 +119,11 @@ if uploaded_file is not None:
                                 if content_item.get("type") == "text" and "text" in content_item:
                                     translation += content_item["text"] + "\n"
 
-                # 2. الاستخراج المباشر في حال عدم وجود steps
+                # 2. الاستخراج المباشر
                 if not translation and "output_text" in result and result["output_text"]:
                     translation = result["output_text"]
 
-                # 3. الاستخراج من candidates الاحتياطية
+                # 3. الاستخراج الاحتياطي من candidates
                 if not translation and "candidates" in result and len(result["candidates"]) > 0:
                     try:
                         parts = result["candidates"][0]["content"]["parts"]
@@ -146,3 +144,12 @@ if uploaded_file is not None:
                 else:
                     st.error("وصل الرد من الذكاء الاصطناعي، لكن لم يتم استخلاص النص منه.")
                     st.json(result)
+            else:
+                st.error(f"تعذر إكمال الترجمة (رمز الحالة: {response.status_code}).")
+                st.code(response.text)
+
+    except KeyError:
+        st.error("لم يتم العثور على GEMINI_API_KEY في إعدادات Secrets.")
+    except Exception as error:
+        st.error("حدث خطأ أثناء معالجة الصورة.")
+        st.caption(str(error))
