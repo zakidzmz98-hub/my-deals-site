@@ -27,7 +27,7 @@ if uploaded_file is not None:
         if st.button("🌐 ترجمة إلى العربية", type="primary"):
             api_key = st.secrets["GEMINI_API_KEY"]
 
-            # ضغط أبعاد الصورة لتسريع الاتصال
+            # تصغير أبعاد الصورة وضغطها لسرعة الاستجابة وتفادي Timeout
             max_size = (1000, 1000)
             image_resized = image.copy()
             image_resized.thumbnail(max_size, Image.Resampling.LANCZOS)
@@ -46,12 +46,13 @@ if uploaded_file is not None:
                 "أن النص غير واضح. لا تضف حوارًا غير موجود."
             )
 
-            # إنشاء عميل Google GenAI SDK الرسمي
+            # إنشاء عميل Google GenAI SDK الرسمي بالمفتاح الخاص بك
             client = genai.Client(api_key=api_key)
 
             with st.spinner("🤖 يجري تحليل الصورة وترجمتها..."):
+                # استخدام النموذج المطلوب والرسمي للمفتاح الخاص بك gemini-3.8-flash
                 response = client.models.generate_content(
-                    model="gemini-2.5-flash",
+                    model="gemini-3.8-flash",
                     contents=[
                         prompt_text,
                         types.Part.from_bytes(
