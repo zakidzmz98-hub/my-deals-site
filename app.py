@@ -1,4 +1,4 @@
-import streamlit as st
+ import streamlit as st
 import requests
 import base64
 from io import BytesIO
@@ -30,7 +30,8 @@ if uploaded_file:
             image.save(buffer, format="JPEG", quality=90)
             image_base64 = base64.b64encode(
                 buffer.getvalue()
-            ).decode("utf-8")url = "https://generativelanguage.googleapis.com/v1beta/interactions"
+            ).decode("utf-8")
+        url = "https://generativelanguage.googleapis.com/v1beta/interactions"
 
 headers = {
     "x-goog-api-key": api_key,
@@ -90,7 +91,7 @@ if response.ok:
         st.error("لم يُرجع النموذج نصًا مترجمًا.")
 else:
     st.error(f"تعذر إكمال الترجمة ({response.status_code}).")
-    st.caption(response.text[:800])     st.caption(response.text[:800])
+    st.caption(response.text[:800])
 
         except KeyError:
             st.error(
