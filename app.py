@@ -27,22 +27,14 @@ if uploaded_file is not None:
         if st.button("🌐 ترجمة إلى العربية", type="primary"):
             api_key = st.secrets["GEMINI_API_KEY"]
 
-            # تجهيز الصورة وتحويلها إلى Base64
+            # --- ضغط وتقليل أبعاد الصورة لضمان السرعة وتفادي الـ Timeout ---
+            max_size = (1024, 1024)
+            image_resized = image.copy()
+            image_resized.thumbnail(max_size, Image.Resampling.LANCZOS)
+
             buffer = BytesIO()
-            image.save(buffer, format="JPEG", quality=85)
+            image_resized.save(buffer, format="JPEG", quality=75)
             image_data = base64.b64encode(buffer.getvalue()).decode("utf-8")
-
-            # قائمة النماذج لتجربتها بالترتيب عند وجود ضغط على السيرفر
-            models_to_try = [
-                "gemini-3.8-flash",
-                "gemini-2.5-flash",
-                "gemini-2.0-flash"
-            ]
-
-            headers = {
-                "x-goog-api-key": api_key,
-                "Content-Type": "application/json",
-            }
 
             prompt_text = (
                 "أنت مساعد لترجمة المانهوا. اقرأ النصوص "
@@ -56,55 +48,81 @@ if uploaded_file is not None:
 
             translation = ""
             success = False
-            last_error_msg = ""
 
             with st.spinner("🤖 يجري تحليل الصورة وترجمتها..."):
-                for model_name in models_to_try:
-                    url = "https://generativelanguage.googleapis.com/v1beta/interactions"
-                    
-                    payload = {
-                        "model": model_name,
-                        "store": False,
-                        "input": [
-                            {"type": "text", "text": prompt_text},
-                            {"type": "image", "mime_type": "image/jpeg", "data": image_data},
-                        ],
+                
+                # --- المسار الأول: Interactions API مع timeout مناسب ---
+                interactions_url = "https://generativelanguage.googleapis.com/v1beta/interactions"
+                interactions_headers = {
+                    "x-goog-api-key": api_key,
+                    "Content-Type": "application/json",
+                }
+                interactions_payload = {
+                    "model": "gemini-3.8-flash",
+                    "store": False,
+                    "input": [
+                        {"type": "text", "text": prompt_text},
+                        {"type": "image", "mime_type": "image/jpeg", "data": image_data},
+                    ],
+                }
+
+                try:
+                    res = requests.post(
+                        interactions_url,
+                        headers=interactions_headers,
+                        json=interactions_payload,
+                        timeout=45
+                    )
+                    if res.ok:
+                        result = res.json()
+                        if "output_text" in result and result["output_text"]:
+                            translation = result["output_text"]
+                            success = True
+                        elif "outputs" in result and len(result["outputs"]) > 0:
+                            first_out = result["outputs"][0]
+                            if isinstance(first_out, dict):
+                                translation = first_out.get("text", "") or first_out.get("content", "")
+                                if translation:
+                                    success = True
+                except (requests.exceptions.Timeout, requests.exceptions.RequestException):
+                    pass
+
+                # --- المسار الاحتياطي: REST API التقليدي في حال الانتهاء أو التأخير ---
+                if not success:
+                    fallback_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
+                    fallback_headers = {"Content-Type": "application/json"}
+                    fallback_payload = {
+                        "contents": [
+                            {
+                                "parts": [
+                                    {"text": prompt_text},
+                                    {
+                                        "inline_data": {
+                                            "mime_type": "image/jpeg",
+                                            "data": image_data
+                                        }
+                                    }
+                                ]
+                            }
+                        ]
                     }
 
-                    # محاولة الطلب حتى مرتين للنموذج الواحد عند حدوث 503
-                    for attempt in range(2):
-                        response = requests.post(
-                            url,
-                            headers=headers,
-                            json=payload,
-                            timeout=120,
+                    try:
+                        res_fb = requests.post(
+                            fallback_url,
+                            headers=fallback_headers,
+                            json=fallback_payload,
+                            timeout=45
                         )
-
-                        if response.ok:
-                            result = response.json()
-                            
-                            # 1. الاستخراج من Interactions API
-                            if "output_text" in result and result["output_text"]:
-                                translation = result["output_text"]
-                            elif "outputs" in result and len(result["outputs"]) > 0:
-                                first_output = result["outputs"][0]
-                                if isinstance(first_output, dict):
-                                    translation = first_output.get("text", "") or first_output.get("content", "")
-                            
-                            if translation:
-                                success = True
-                                break
-
-                        elif response.status_code == 503:
-                            # ضغط على السيرفر - ننتظر ثانية ونعيد المحاولة أو ننتقل للنموذج التالي
-                            time.sleep(1.5)
-                            continue
-                        else:
-                            last_error_msg = f"({response.status_code}) {response.text[:200]}"
-                            break
-
-                    if success:
-                        break
+                        if res_fb.ok:
+                            fb_data = res_fb.json()
+                            if "candidates" in fb_data and len(fb_data["candidates"]) > 0:
+                                parts = fb_data["candidates"][0]["content"]["parts"]
+                                translation = "".join([p.get("text", "") for p in parts])
+                                if translation:
+                                    success = True
+                    except Exception:
+                        pass
 
             if success and translation:
                 st.subheader("📝 الترجمة العربية")
@@ -117,10 +135,7 @@ if uploaded_file is not None:
                     mime="text/plain",
                 )
             else:
-                if last_error_msg:
-                    st.error(f"تعذر إكمال الترجمة: {last_error_msg}")
-                else:
-                    st.error("جميع خوادم الذكاء الاصطناعي مشغولة حالياً بسبب الضغط العالي. يرجى الانتظار بضع ثوانٍ والإعادة.")
+                st.error("استغرق الخادم وقتاً طويلاً في المعالجة. يرجى تجربة إعادة الضغط أو رفع صورة بحجم أصغر.")
 
     except KeyError:
         st.error("لم يتم العثور على GEMINI_API_KEY في إعدادات Secrets.")
