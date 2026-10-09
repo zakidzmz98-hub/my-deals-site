@@ -109,7 +109,7 @@ if uploaded_file is not None:
                     json=payload,
                     timeout=60,
                 )
-if response.ok:
+            if response.ok:
                 result = response.json()
                 translation = ""
 
