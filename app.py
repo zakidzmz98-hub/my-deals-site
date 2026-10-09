@@ -26,82 +26,92 @@ if uploaded_file is not None:
         if st.button("🌐 ترجمة إلى العربية", type="primary"):
             api_key = st.secrets["GEMINI_API_KEY"]
 
+            # تجهيز الصورة وترميزها بـ Base64
             buffer = BytesIO()
             image.save(buffer, format="JPEG", quality=85)
-            image_data = base64.b64encode(
-                buffer.getvalue()
-            ).decode("utf-8")
+            image_data = base64.b64encode(buffer.getvalue()).decode("utf-8")
 
-            url = (
-                "https://generativelanguage.googleapis.com"
-                "/v1beta/interactions"
-            )
+            # قائمة النماذج المتاحة بالترتيب (إذا كان الأول مشغولاً يتم الانتقال للثاني)
+            models_to_try = [
+                "gemini-1.5-flash",
+                "gemini-2.5-flash",
+                "gemini-1.5-pro"
+            ]
 
             headers = {
-                "x-goog-api-key": api_key,
-                "Content-Type": "application/json",
+                "Content-Type": "application/json"
             }
+
+            prompt_text = (
+                "أنت مساعد لترجمة المانهوا. اقرأ النصوص "
+                "المطبوعة داخل فقاعات الكلام في الصورة. "
+                "رتبها بحسب ترتيب القراءة الظاهر. "
+                "ترجم كل فقاعة إلى العربية الفصحى بأسلوب "
+                "طبيعي، وضع كل فقاعة في سطر مستقل. "
+                "لا تخمّن الكلمات غير الواضحة، بل اذكر "
+                "أن النص غير واضح. لا تضف حوارًا غير موجود."
+            )
 
             payload = {
-                "model": "gemini-3.8-flash",
-                "store": False,
-                "input": [
+                "contents": [
                     {
-                        "type": "text",
-                        "text": (
-                            "أنت مساعد لترجمة المانهوا. اقرأ النصوص "
-                            "المطبوعة داخل فقاعات الكلام في الصورة. "
-                            "رتبها بحسب ترتيب القراءة الظاهر. "
-                            "ترجم كل فقاعة إلى العربية الفصحى بأسلوب "
-                            "طبيعي، وضع كل فقاعة في سطر مستقل. "
-                            "لا تخمّن الكلمات غير الواضحة، بل اذكر "
-                            "أن النص غير واضح. لا تضف حوارًا غير موجود."
-                        ),
-                    },
-                    {
-                        "type": "image",
-                        "mime_type": "image/jpeg",
-                        "data": image_data,
-                    },
-                ],
+                        "parts": [
+                            {"text": prompt_text},
+                            {
+                                "inline_data": {
+                                    "mime_type": "image/jpeg",
+                                    "data": image_data
+                                }
+                            }
+                        ]
+                    }
+                ]
             }
 
+            translation = ""
+            success = False
+
             with st.spinner("🤖 يجري تحليل الصورة وترجمتها..."):
-                response = requests.post(
-                    url,
-                    headers=headers,
-                    json=payload,
-                    timeout=120,
+                for model_name in models_to_try:
+                    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}"
+                    
+                    response = requests.post(
+                        url,
+                        headers=headers,
+                        json=payload,
+                        timeout=120
+                    )
+
+                    if response.ok:
+                        result = response.json()
+                        try:
+                            translation = result["candidates"][0]["content"]["parts"][0]["text"]
+                            success = True
+                            break  # تم الحصول على النتيجة بنجاح، نخرج من الحلقة
+                        except (KeyError, IndexError):
+                            continue
+                    elif response.status_code == 503:
+                        # في حال وجود ضغط على النموذج الحالي، ننتقل للنموذج التالي
+                        continue
+                    else:
+                        st.warning(f"تنبيه من النموذج {model_name}: {response.status_code}")
+                        st.code(response.text[:500])
+
+            if success and translation:
+                st.subheader("📝 الترجمة العربية")
+                st.markdown(translation)
+
+                st.download_button(
+                    "⬇️ تنزيل الترجمة",
+                    data=translation,
+                    file_name="manhwa_translation.txt",
+                    mime="text/plain",
                 )
-
-            if response.ok:
-                result = response.json()
-                translation = result.get("output_text", "")
-
-                if translation:
-                    st.subheader("📝 الترجمة العربية")
-                    st.markdown(translation)
-
-                    st.download_button(
-                        "⬇️ تنزيل الترجمة",
-                        data=translation,
-                        file_name="manhwa_translation.txt",
-                        mime="text/plain",
-                    )
-                else:
-                    st.error(
-                        "وصل الرد، لكن لم أجد نص الترجمة فيه."
-                    )
             else:
-                st.error(
-                    f"تعذر إكمال الترجمة ({response.status_code})."
-                )
-                st.code(response.text[:1000])
+                st.error("جميع خوادم الترجمة مشغولة حالياً لارتفاع الضغط. يرجى المحاولة بعد بضع ثوانٍ.")
 
     except KeyError:
-        st.error(
-            "لم يتم العثور على GEMINI_API_KEY في إعدادات Secrets."
-        )
+        st.error("لم يتم العثور على GEMINI_API_KEY في إعدادات Secrets.")
     except Exception as error:
         st.error("حدث خطأ أثناء معالجة الصورة.")
         st.caption(str(error))
