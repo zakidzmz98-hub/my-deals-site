@@ -9,21 +9,31 @@ st.set_page_config(
 )
 
 st.title("📖 مترجم المانهوا")
-st.write("ارفع صورة مانهوا لنبدأ ترجمتها إلى العربية.")
+st.write("ارفع صورة المانهوا للبدء في تجهيزها للترجمة إلى العربية.")
 
 uploaded_file = st.file_uploader(
     "اختر صورة المانهوا",
     type=["png", "jpg", "jpeg", "webp"]
 )
 
-if uploaded_file:
+if uploaded_file is not None:
     image = Image.open(uploaded_file).convert("RGB")
-    st.image(image, caption="الصورة الأصلية", use_container_width=True)
 
-    st.success("تم تحميل الصورة بنجاح!")
+    st.image(
+        image,
+        caption="الصورة المرفوعة",
+        use_container_width=True
+    )
 
-    st.subheader("النص المستخرج")
-    st.info("سنضيف التعرّف على النص في الخطوة التالية.")
+    st.success("تم رفع الصورة بنجاح!")
 
-    st.subheader("الترجمة العربية")
-    st.info("سنضيف الترجمة في المرحلة التالية.")
+    st.info(
+        "المرحلة التالية: إضافة الذكاء الاصطناعي "
+        "لاستخراج النصوص وترجمتها إلى العربية."
+    )
+
+    if st.button("بدء الترجمة"):
+        st.warning(
+            "محرك استخراج النصوص والترجمة لم يُربط بعد. "
+            "سنضيفه في الخطوة التالية."
+        )
