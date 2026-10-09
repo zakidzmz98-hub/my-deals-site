@@ -109,17 +109,31 @@ if uploaded_file is not None:
                     json=payload,
                     timeout=60,
                 )
-
-            if response.ok:
+if response.ok:
                 result = response.json()
-                
-                translation = result.get("output_text", "")
-                if not translation and "outputs" in result and len(result["outputs"]) > 0:
-                    first_out = result["outputs"][0]
-                    if isinstance(first_out, dict):
-                        translation = first_out.get("text", "") or first_out.get("content", "")
+                translation = ""
 
-                if translation:
+                # 1. الاستخراج من خطوات Interactions API (steps -> model_output)
+                if "steps" in result and isinstance(result["steps"], list):
+                    for step in result["steps"]:
+                        if step.get("type") == "model_output" and "content" in step:
+                            for content_item in step["content"]:
+                                if content_item.get("type") == "text" and "text" in content_item:
+                                    translation += content_item["text"] + "\n"
+
+                # 2. الاستخراج المباشر في حال عدم وجود steps
+                if not translation and "output_text" in result and result["output_text"]:
+                    translation = result["output_text"]
+
+                # 3. الاستخراج من candidates الاحتياطية
+                if not translation and "candidates" in result and len(result["candidates"]) > 0:
+                    try:
+                        parts = result["candidates"][0]["content"]["parts"]
+                        translation = "".join([p.get("text", "") for p in parts])
+                    except (KeyError, IndexError):
+                        pass
+
+                if translation.strip():
                     st.subheader("📝 الترجمة العربية")
                     st.markdown(translation)
 
@@ -130,14 +144,5 @@ if uploaded_file is not None:
                         mime="text/plain",
                     )
                 else:
-                    st.error("وصل الرد من الذكاء الاصطناعي، لكن لم يتم العثور على نص الترجمة.")
+                    st.error("وصل الرد من الذكاء الاصطناعي، لكن لم يتم استخلاص النص منه.")
                     st.json(result)
-            else:
-                st.error(f"تعذر إكمال الترجمة (رمز الحالة: {response.status_code}).")
-                st.code(response.text)
-
-    except KeyError:
-        st.error("لم يتم العثور على GEMINI_API_KEY في إعدادات Secrets.")
-    except Exception as error:
-        st.error("حدث خطأ أثناء معالجة الصورة.")
-        st.caption(str(error))
