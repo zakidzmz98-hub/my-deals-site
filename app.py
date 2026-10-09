@@ -31,7 +31,7 @@ if uploaded_file is not None:
             image.save(buffer, format="JPEG", quality=85)
             image_data = base64.b64encode(buffer.getvalue()).decode("utf-8")
 
-            # رابط Interactions API الجديد
+            # رابط Interactions API
             url = "https://generativelanguage.googleapis.com/v1beta/interactions"
 
             headers = {
@@ -49,7 +49,6 @@ if uploaded_file is not None:
                 "أن النص غير واضح. لا تضف حوارًا غير موجود."
             )
 
-            # الهيكل الصحيح الخاص بـ Interactions API ونموذج gemini-3.8-flash
             payload = {
                 "model": "gemini-3.8-flash",
                 "store": False,
@@ -74,13 +73,12 @@ if uploaded_file is not None:
                     timeout=120,
                 )
 
-                if response.ok:
+            if response.ok:
                 result = response.json()
                 
-                # استخراج الترجمة مرونة لدعم كافة إصدارات الـ API
                 translation = ""
                 
-                # 1. التجربة من حقول Interactions API المركبة
+                # 1. الاستخراج من Interactions API
                 if "output_text" in result and result["output_text"]:
                     translation = result["output_text"]
                 elif "outputs" in result and len(result["outputs"]) > 0:
@@ -88,7 +86,7 @@ if uploaded_file is not None:
                     if isinstance(first_output, dict):
                         translation = first_output.get("text", "") or first_output.get("content", "")
                 
-                # 2. التجربة من هيكل candidates التقليدي الاحتياطي
+                # 2. الاستخراج الاحتياطي من هيكل candidates
                 elif "candidates" in result and len(result["candidates"]) > 0:
                     try:
                         parts = result["candidates"][0]["content"]["parts"]
@@ -108,5 +106,14 @@ if uploaded_file is not None:
                     )
                 else:
                     st.error("وصل الرد من الذكاء الاصطناعي، لكن لم يتم استخلاص النص منه.")
-                    st.write("🔍 **هيكل الرد المحصل من الخادم (debug):**")
+                    st.write("🔍 **هيكل الرد (Debug JSON):**")
                     st.json(result)
+            else:
+                st.error(f"تعذر إكمال الترجمة ({response.status_code}).")
+                st.code(response.text[:1000])
+
+    except KeyError:
+        st.error("لم يتم العثور على GEMINI_API_KEY في إعدادات Secrets.")
+    except Exception as error:
+        st.error("حدث خطأ أثناء معالجة الصورة.")
+        st.caption(str(error))
