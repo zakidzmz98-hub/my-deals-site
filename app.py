@@ -74,10 +74,27 @@ if uploaded_file is not None:
                     timeout=120,
                 )
 
-            if response.ok:
+         if response.ok:
                 result = response.json()
-                # استخراج الترجمة من حقل output_text الخاص بـ Interactions API
-                translation = result.get("output_text", "")
+                
+                # استخراج الترجمة مرونة لدعم كافة إصدارات الـ API
+                translation = ""
+                
+                # 1. التجربة من حقول Interactions API المركبة
+                if "output_text" in result and result["output_text"]:
+                    translation = result["output_text"]
+                elif "outputs" in result and len(result["outputs"]) > 0:
+                    first_output = result["outputs"][0]
+                    if isinstance(first_output, dict):
+                        translation = first_output.get("text", "") or first_output.get("content", "")
+                
+                # 2. التجربة من هيكل candidates التقليدي الاحتياطي
+                elif "candidates" in result and len(result["candidates"]) > 0:
+                    try:
+                        parts = result["candidates"][0]["content"]["parts"]
+                        translation = "".join([part.get("text", "") for part in parts])
+                    except (KeyError, IndexError):
+                        pass
 
                 if translation:
                     st.subheader("📝 الترجمة العربية")
@@ -90,13 +107,6 @@ if uploaded_file is not None:
                         mime="text/plain",
                     )
                 else:
-                    st.error("وصل الرد من الذكاء الاصطناعي، لكن لم يتم العثور على نص الترجمة.")
-            else:
-                st.error(f"تعذر إكمال الترجمة ({response.status_code}).")
-                st.code(response.text[:1000])
-
-    except KeyError:
-        st.error("لم يتم العثور على GEMINI_API_KEY في إعدادات Secrets.")
-    except Exception as error:
-        st.error("حدث خطأ أثناء معالجة الصورة.")
-        st.caption(str(error))
+                    st.error("وصل الرد من الذكاء الاصطناعي، لكن لم يتم استخلاص النص منه.")
+                    st.write("🔍 **هيكل الرد المحصل من الخادم (debug):**")
+                    st.json(result)
