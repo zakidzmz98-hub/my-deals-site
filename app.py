@@ -1,9 +1,10 @@
 import base64
 from io import BytesIO
 
-import requests
 import streamlit as st
 from PIL import Image
+from google import genai
+from google.genai import types
 
 st.set_page_config(
     page_title="مترجم المانهوا",
@@ -26,14 +27,14 @@ if uploaded_file is not None:
         if st.button("🌐 ترجمة إلى العربية", type="primary"):
             api_key = st.secrets["GEMINI_API_KEY"]
 
-            # ضغط أبعاد الصورة
+            # ضغط أبعاد الصورة لتسريع الاتصال
             max_size = (1000, 1000)
             image_resized = image.copy()
             image_resized.thumbnail(max_size, Image.Resampling.LANCZOS)
 
             buffer = BytesIO()
             image_resized.save(buffer, format="JPEG", quality=80)
-            image_data = base64.b64encode(buffer.getvalue()).decode("utf-8")
+            compressed_image_bytes = buffer.getvalue()
 
             prompt_text = (
                 "أنت مساعد لترجمة المانهوا. اقرأ النصوص "
@@ -45,51 +46,38 @@ if uploaded_file is not None:
                 "أن النص غير واضح. لا تضف حوارًا غير موجود."
             )
 
-            # الرابط المباشر بطلب REST قياسي
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
-            headers = {"Content-Type": "application/json"}
-            
-            payload = {
-                "contents": [
-                    {
-                        "parts": [
-                            {"text": prompt_text},
-                            {
-                                "inline_data": {
-                                    "mime_type": "image/jpeg",
-                                    "data": image_data
-                                }
-                            }
-                        ]
-                    }
-                ]
-            }
+            # إنشاء عميل Google GenAI SDK الرسمي
+            client = genai.Client(api_key=api_key)
 
             with st.spinner("🤖 يجري تحليل الصورة وترجمتها..."):
-                response = requests.post(url, headers=headers, json=payload, timeout=60)
+                response = client.models.generate_content(
+                    model="gemini-2.5-flash",
+                    contents=[
+                        prompt_text,
+                        types.Part.from_bytes(
+                            data=compressed_image_bytes,
+                            mime_type="image/jpeg"
+                        )
+                    ]
+                )
 
-            if response.ok:
-                result = response.json()
-                try:
-                    translation = result["candidates"][0]["content"]["parts"][0]["text"]
-                    st.subheader("📝 الترجمة العربية")
-                    st.markdown(translation)
+            translation = response.text
 
-                    st.download_button(
-                        "⬇️ تنزيل الترجمة",
-                        data=translation,
-                        file_name="manhwa_translation.txt",
-                        mime="text/plain",
-                    )
-                except (KeyError, IndexError):
-                    st.error("تم استلام الاستجابة ولكن لم يتم العثور على نص الترجمة.")
-                    st.json(result)
+            if translation:
+                st.subheader("📝 الترجمة العربية")
+                st.markdown(translation)
+
+                st.download_button(
+                    "⬇️ تنزيل الترجمة",
+                    data=translation,
+                    file_name="manhwa_translation.txt",
+                    mime="text/plain",
+                )
             else:
-                st.error(f"حدث خطأ من الخادم (رمز الحالة: {response.status_code})")
-                st.code(response.text)
+                st.error("وصل الرد لكن لم يتم استخلاص أي نص.")
 
     except KeyError:
         st.error("لم يتم العثور على GEMINI_API_KEY في إعدادات Secrets.")
     except Exception as error:
         st.error("حدث خطأ أثناء معالجة الصورة.")
-        st.caption(str(error))
+        st.code(str(error))
