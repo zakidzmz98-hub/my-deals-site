@@ -30,7 +30,8 @@ if uploaded_file:
             image.save(buffer, format="JPEG", quality=90)
             image_base64 = base64.b64encode(
                 buffer.getvalue()
-            ).decode("utf-8")
+            ).decode("utf-8") 
+    try:
         url = "https://generativelanguage.googleapis.com/v1beta/interactions"
 
 headers = {
