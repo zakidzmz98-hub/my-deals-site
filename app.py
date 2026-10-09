@@ -74,7 +74,7 @@ if uploaded_file is not None:
                     timeout=120,
                 )
 
-         if response.ok:
+                if response.ok:
                 result = response.json()
                 
                 # استخراج الترجمة مرونة لدعم كافة إصدارات الـ API
