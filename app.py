@@ -30,82 +30,67 @@ if uploaded_file:
             image.save(buffer, format="JPEG", quality=90)
             image_base64 = base64.b64encode(
                 buffer.getvalue()
-            ).decode("utf-8")
+            ).decode("utf-8")url = "https://generativelanguage.googleapis.com/v1beta/interactions"
 
-            url = (
-                "https://generativelanguage.googleapis.com/"
-                "v1beta/models/gemini-2.5-flash:generateContent"
+headers = {
+    "x-goog-api-key": api_key,
+    "Content-Type": "application/json"
+}
+
+payload = {
+    "model": "gemini-3.8-flash",
+    "store": False,
+    "input": [
+        {
+            "type": "text",
+            "text": (
+                "اقرأ النصوص المطبوعة في فقاعات المانهوا، "
+                "ثم ترجم كل حوار إلى العربية الفصحى. "
+                "رتب الحوارات حسب ظهورها، ولا تخمّن "
+                "النصوص غير الواضحة."
             )
+        },
+        {
+            "type": "image",
+            "mime_type": "image/jpeg",
+            "data": image_base64
+        }
+    ]
+}
 
-            payload = {
-                "contents": [{
-                    "parts": [
-                        {
-                            "text": (
-                                "حلل صورة المانهوا واقرأ النصوص المطبوعة "
-                                "داخل فقاعات الكلام والمؤثرات النصية. "
-                                "رتب الحوارات حسب ترتيب القراءة المناسب. "
-                                "ترجمها إلى العربية الفصحى بأسلوب طبيعي "
-                                "يحافظ على المعنى والشخصيات. "
-                                "اعرض كل نص في سطر منفصل مع رقم، "
-                                "ثم ترجمته العربية. لا تخمّن النص "
-                                "غير المقروء؛ اذكر أنه غير واضح."
-                            )
-                        },
-                        {
-                            "inline_data": {
-                                "mime_type": "image/jpeg",
-                                "data": image_base64
-                            }
-                        }
-                    ]
-                }],
-                "generationConfig": {
-                    "maxOutputTokens": 2048,
-                    "temperature": 0.2
-                }
-            }
+with st.spinner("🤖 يجري تحليل الصورة وترجمتها..."):
+    response = requests.post(
+        url,
+        headers=headers,
+        json=payload,
+        timeout=120
+    )
 
-            with st.spinner("🤖 يجري تحليل الصورة وترجمتها..."):
-                response = requests.post(
-                    url,
-                    params={"key": api_key},
-                    json=payload,
-                    timeout=120
-                )
+if response.ok:
+    data = response.json()
+    translation = data.get("output_text", "")
 
-            if response.ok:
-                data = response.json()
-                parts = (
-                    data.get("candidates", [{}])[0]
-                    .get("content", {})
-                    .get("parts", [])
-                )
-                translation = "\n".join(
-                    part["text"]
-                    for part in parts
-                    if "text" in part
-                )
+    if not translation:
+        for item in data.get("outputs", []):
+            for part in item.get("content", []):
+                if part.get("type") == "text":
+                    translation += part.get("text", "")
 
-                if translation:
-                    st.subheader("📝 الترجمة العربية")
-                    st.markdown(translation)
-                    st.download_button(
-                        "⬇️ تنزيل الترجمة النصية",
-                        data=translation,
-                        file_name="manhwa_translation.txt",
-                        mime="text/plain"
-                    )
-                else:
-                    st.error(
-                        "لم يُرجع النموذج ترجمة نصية. "
-                        "جرّب صورة أخرى."
-                    )
-            else:
-                st.error(
-                    f"تعذر إكمال الترجمة ({response.status_code})."
-                )
-                st.caption(response.text[:800])
+    if translation:
+        st.subheader("📝 الترجمة العربية")
+        st.markdown(translation)
+
+        st.download_button(
+            "⬇️ تنزيل الترجمة",
+            data=translation,
+            file_name="manhwa_translation.txt",
+            mime="text/plain"
+        )
+    else:
+        st.error("لم يُرجع النموذج نصًا مترجمًا.")
+else:
+    st.error(f"تعذر إكمال الترجمة ({response.status_code}).")
+    st.caption(response.text[:800])     st.caption(response.text[:800])
 
         except KeyError:
             st.error(
