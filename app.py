@@ -1,5 +1,4 @@
 import base64
-import time
 from io import BytesIO
 
 import requests
@@ -27,13 +26,13 @@ if uploaded_file is not None:
         if st.button("🌐 ترجمة إلى العربية", type="primary"):
             api_key = st.secrets["GEMINI_API_KEY"]
 
-            # --- ضغط وتقليل أبعاد الصورة لضمان السرعة وتفادي الـ Timeout ---
-            max_size = (1024, 1024)
+            # ضغط أبعاد الصورة
+            max_size = (1000, 1000)
             image_resized = image.copy()
             image_resized.thumbnail(max_size, Image.Resampling.LANCZOS)
 
             buffer = BytesIO()
-            image_resized.save(buffer, format="JPEG", quality=75)
+            image_resized.save(buffer, format="JPEG", quality=80)
             image_data = base64.b64encode(buffer.getvalue()).decode("utf-8")
 
             prompt_text = (
@@ -46,96 +45,48 @@ if uploaded_file is not None:
                 "أن النص غير واضح. لا تضف حوارًا غير موجود."
             )
 
-            translation = ""
-            success = False
-
-            with st.spinner("🤖 يجري تحليل الصورة وترجمتها..."):
-                
-                # --- المسار الأول: Interactions API مع timeout مناسب ---
-                interactions_url = "https://generativelanguage.googleapis.com/v1beta/interactions"
-                interactions_headers = {
-                    "x-goog-api-key": api_key,
-                    "Content-Type": "application/json",
-                }
-                interactions_payload = {
-                    "model": "gemini-3.8-flash",
-                    "store": False,
-                    "input": [
-                        {"type": "text", "text": prompt_text},
-                        {"type": "image", "mime_type": "image/jpeg", "data": image_data},
-                    ],
-                }
-
-                try:
-                    res = requests.post(
-                        interactions_url,
-                        headers=interactions_headers,
-                        json=interactions_payload,
-                        timeout=45
-                    )
-                    if res.ok:
-                        result = res.json()
-                        if "output_text" in result and result["output_text"]:
-                            translation = result["output_text"]
-                            success = True
-                        elif "outputs" in result and len(result["outputs"]) > 0:
-                            first_out = result["outputs"][0]
-                            if isinstance(first_out, dict):
-                                translation = first_out.get("text", "") or first_out.get("content", "")
-                                if translation:
-                                    success = True
-                except (requests.exceptions.Timeout, requests.exceptions.RequestException):
-                    pass
-
-                # --- المسار الاحتياطي: REST API التقليدي في حال الانتهاء أو التأخير ---
-                if not success:
-                    fallback_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
-                    fallback_headers = {"Content-Type": "application/json"}
-                    fallback_payload = {
-                        "contents": [
+            # الرابط المباشر بطلب REST قياسي
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
+            headers = {"Content-Type": "application/json"}
+            
+            payload = {
+                "contents": [
+                    {
+                        "parts": [
+                            {"text": prompt_text},
                             {
-                                "parts": [
-                                    {"text": prompt_text},
-                                    {
-                                        "inline_data": {
-                                            "mime_type": "image/jpeg",
-                                            "data": image_data
-                                        }
-                                    }
-                                ]
+                                "inline_data": {
+                                    "mime_type": "image/jpeg",
+                                    "data": image_data
+                                }
                             }
                         ]
                     }
+                ]
+            }
 
-                    try:
-                        res_fb = requests.post(
-                            fallback_url,
-                            headers=fallback_headers,
-                            json=fallback_payload,
-                            timeout=45
-                        )
-                        if res_fb.ok:
-                            fb_data = res_fb.json()
-                            if "candidates" in fb_data and len(fb_data["candidates"]) > 0:
-                                parts = fb_data["candidates"][0]["content"]["parts"]
-                                translation = "".join([p.get("text", "") for p in parts])
-                                if translation:
-                                    success = True
-                    except Exception:
-                        pass
+            with st.spinner("🤖 يجري تحليل الصورة وترجمتها..."):
+                response = requests.post(url, headers=headers, json=payload, timeout=60)
 
-            if success and translation:
-                st.subheader("📝 الترجمة العربية")
-                st.markdown(translation)
+            if response.ok:
+                result = response.json()
+                try:
+                    translation = result["candidates"][0]["content"]["parts"][0]["text"]
+                    st.subheader("📝 الترجمة العربية")
+                    st.markdown(translation)
 
-                st.download_button(
-                    "⬇️ تنزيل الترجمة",
-                    data=translation,
-                    file_name="manhwa_translation.txt",
-                    mime="text/plain",
-                )
+                    st.download_button(
+                        "⬇️ تنزيل الترجمة",
+                        data=translation,
+                        file_name="manhwa_translation.txt",
+                        mime="text/plain",
+                    )
+                except (KeyError, IndexError):
+                    st.error("تم استلام الاستجابة ولكن لم يتم العثور على نص الترجمة.")
+                    st.json(result)
             else:
-                st.error("استغرق الخادم وقتاً طويلاً في المعالجة. يرجى تجربة إعادة الضغط أو رفع صورة بحجم أصغر.")
+                st.error(f"حدث خطأ من الخادم (رمز الحالة: {response.status_code})")
+                st.code(response.text)
 
     except KeyError:
         st.error("لم يتم العثور على GEMINI_API_KEY في إعدادات Secrets.")
