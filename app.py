@@ -1,4 +1,5 @@
 import base64
+import time
 from io import BytesIO
 
 import requests
@@ -99,54 +100,71 @@ if uploaded_file is not None:
                 ],
             }
 
+            translation = ""
+            success = False
+            last_response = None
+
             with st.spinner("🤖 يجري تحليل الصورة وترجمتها..."):
-                response = requests.post(
-                    url,
-                    headers=headers,
-                    json=payload,
-                    timeout=60,
-                )
-
-            if response.ok:
-                result = response.json()
-                translation = ""
-
-                # 1. الاستخراج من steps (طريقة Interactions API)
-                if "steps" in result and isinstance(result["steps"], list):
-                    for step in result["steps"]:
-                        if step.get("type") == "model_output" and "content" in step:
-                            for content_item in step["content"]:
-                                if content_item.get("type") == "text" and "text" in content_item:
-                                    translation += content_item["text"] + "\n"
-
-                # 2. الاستخراج المباشر
-                if not translation and "output_text" in result and result["output_text"]:
-                    translation = result["output_text"]
-
-                # 3. الاستخراج الاحتياطي من candidates
-                if not translation and "candidates" in result and len(result["candidates"]) > 0:
-                    try:
-                        parts = result["candidates"][0]["content"]["parts"]
-                        translation = "".join([p.get("text", "") for p in parts])
-                    except (KeyError, IndexError):
-                        pass
-
-                if translation.strip():
-                    st.subheader("📝 الترجمة العربية")
-                    st.markdown(translation)
-
-                    st.download_button(
-                        "⬇️ تنزيل الترجمة",
-                        data=translation,
-                        file_name="manhwa_translation.txt",
-                        mime="text/plain",
+                # نظام إعادة المحاولة التلقائية (حتى 3 محاولات عند الضغط)
+                max_retries = 3
+                for attempt in range(max_retries):
+                    response = requests.post(
+                        url,
+                        headers=headers,
+                        json=payload,
+                        timeout=60,
                     )
+                    last_response = response
+
+                    if response.ok:
+                        result = response.json()
+                        
+                        # 1. الاستخراج من steps (Interactions API)
+                        if "steps" in result and isinstance(result["steps"], list):
+                            for step in result["steps"]:
+                                if step.get("type") == "model_output" and "content" in step:
+                                    for content_item in step["content"]:
+                                        if content_item.get("type") == "text" and "text" in content_item:
+                                            translation += content_item["text"] + "\n"
+
+                        # 2. الاستخراج المباشر
+                        if not translation and "output_text" in result and result["output_text"]:
+                            translation = result["output_text"]
+
+                        # 3. الاستخراج الاحتياطي من candidates
+                        if not translation and "candidates" in result and len(result["candidates"]) > 0:
+                            try:
+                                parts = result["candidates"][0]["content"]["parts"]
+                                translation = "".join([p.get("text", "") for p in parts])
+                            except (KeyError, IndexError):
+                                pass
+
+                        if translation.strip():
+                            success = True
+                            break
+
+                    elif response.status_code in [503, 429]:
+                        # عند وجود ضغط ننتظر ثانيتين ونحاول مجدداً
+                        time.sleep(2)
+                    else:
+                        break
+
+            if success and translation.strip():
+                st.subheader("📝 الترجمة العربية")
+                st.markdown(translation)
+
+                st.download_button(
+                    "⬇️ تنزيل الترجمة",
+                    data=translation,
+                    file_name="manhwa_translation.txt",
+                    mime="text/plain",
+                )
+            else:
+                if last_response is not None and not last_response.ok:
+                    st.error(f"تعذر إكمال الترجمة (رمز الحالة: {last_response.status_code}).")
+                    st.code(last_response.text)
                 else:
                     st.error("وصل الرد من الذكاء الاصطناعي، لكن لم يتم استخلاص النص منه.")
-                    st.json(result)
-            else:
-                st.error(f"تعذر إكمال الترجمة (رمز الحالة: {response.status_code}).")
-                st.code(response.text)
 
     except KeyError:
         st.error("لم يتم العثور على GEMINI_API_KEY في إعدادات Secrets.")
