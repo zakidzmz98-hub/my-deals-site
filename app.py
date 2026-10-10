@@ -156,7 +156,8 @@ def ask_gemini(client, messages, task, language):
             "وتحقق من إعدادات المفتاح."
         )
 
-    raise RuntimeError(message) from last_error
+ details = f"{type(last_error).__name__}: {last_error}"
+raise RuntimeError(f"{message}\nالتفاصيل التقنية: {details}") from last_error
 
 
 # -----------------------------
