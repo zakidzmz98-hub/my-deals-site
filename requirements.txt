@@ -1,6 +1,2 @@
 streamlit
-pillow
-requests
 google-genai
-streamlit
-Pillow
