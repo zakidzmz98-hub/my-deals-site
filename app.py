@@ -1,206 +1,237 @@
-import base64
+import os
 import time
-from concurrent.futures import ThreadPoolExecutor
-from io import BytesIO
 
-import requests
 import streamlit as st
-from PIL import Image
+from google import genai
+from google.genai import types
 
+# -----------------------------
+# إعدادات التطبيق
+# -----------------------------
 st.set_page_config(
-    page_title="مترجم المانهوا",
-    page_icon="📚",
-    layout="centered"
+    page_title="وكيل الذكاء الاصطناعي",
+    page_icon="🤖",
+    layout="centered",
 )
 
-# --- تحسين التمرير بالماوس وتنسيق البطاقات ---
-st.markdown("""
-    <style>
-    html, body, [data-testid="stAppViewContainer"], [data-testid="stHeader"] {
-        overflow-y: auto !important;
-        scroll-behavior: smooth !important;
-    }
+# استخدام اسم الموديل المستقر الموصى به
+MODEL_NAME = "gemini-2.5-flash"
 
-    [data-testid="stMainBlockContainer"] {
-        max-width: 850px;
-        padding-top: 2rem;
-        padding-bottom: 5rem;
-    }
-
-    .manhwa-card {
-        background-color: #f8f9fa;
-        border: 1px solid #e9ecef;
-        border-radius: 10px;
-        padding: 15px;
-        margin-bottom: 25px;
-    }
-
-    ::-webkit-scrollbar {
-        width: 10px;
-    }
-    ::-webkit-scrollbar-track {
-        background: #f1f1f1;
-    }
-    ::-webkit-scrollbar-thumb {
-        background: #888;
-        border-radius: 5px;
-    }
-    ::-webkit-scrollbar-thumb:hover {
-        background: #555;
-    }
-    </style>
-""", unsafe_allow_html=True)
-
-st.title("📚 مترجم المانهوا المتعدد")
-st.write("ارفع صورة أو عدة صور مانهوا لترجمتها جميعاً في نفس الوقت بأسلوب متوازٍ وسريع.")
-
-uploaded_files = st.file_uploader(
-    "اختر صورة أو عدة صور",
-    type=["png", "jpg", "jpeg", "webp"],
-    accept_multiple_files=True
-)
+SYSTEM_INSTRUCTION = """
+أنت وكيل ذكاء اصطناعي متعدد المهام.
+أجب باللغة التي يحددها المستخدم.
+ساعد في البرمجة، والتفسير، والترجمة، والتلخيص،
+والتخطيط، وتحليل النصوص وتوليد الأفكار.
+كن واضحًا ودقيقًا، ولا تدّعِ أنك نفذت مهمة
+خارج المحادثة أو أنك بحثت في الإنترنت إذا لم تفعل ذلك.
+إذا كان الطلب غير واضح، فاطلب توضيحًا مناسبًا.
+"""
 
 
-def process_single_image(file_obj, api_key):
-    """دالة معالجة وترجمة صورة واحدة"""
+def get_api_key():
+    """قراءة المفتاح من أسرار Streamlit أو متغير البيئة."""
     try:
-        image = Image.open(file_obj).convert("RGB")
-        
-        # تصغير سريع جداً لتقليل زمن النقل
-        max_size = (800, 800)
-        image_resized = image.copy()
-        image_resized.thumbnail(max_size, Image.Resampling.LANCZOS)
+        key = st.secrets.get("GEMINI_API_KEY", "")
+        if key:
+            return str(key).strip()
+    except Exception:
+        pass
 
-        buffer = BytesIO()
-        image_resized.save(buffer, format="JPEG", quality=70)
-        image_data = base64.b64encode(buffer.getvalue()).decode("utf-8")
+    return os.environ.get("GEMINI_API_KEY", "").strip()
 
-        url = "https://generativelanguage.googleapis.com/v1beta/interactions"
-        headers = {
-            "x-goog-api-key": api_key,
-            "Content-Type": "application/json",
-        }
 
-        prompt_text = (
-            "أنت مساعد لترجمة المانهوا. اقرأ النصوص "
-            "المطبوعة داخل فقاعات الكلام في الصورة. "
-            "رتبها بحسب ترتيب القراءة الظاهر. "
-            "ترجم كل فقاعة إلى العربية الفصحى بأسلوب "
-            "طبيعي، وضع كل فقاعة في سطر مستقل. "
-            "لا تخمّن الكلمات غير الواضحة، بل اذكر "
-            "أن النص غير واضح. لا تضف حوارًا غير موجود."
+def create_client(api_key):
+    return genai.Client(api_key=api_key)
+
+
+def ask_gemini(client, messages, task, language):
+    """إرسال سياق المحادثة إلى Gemini مع إعادة محاولة محدودة."""
+    task_instructions = {
+        "مساعد عام": "ساعد المستخدم في المهمة التي يطلبها.",
+        "البرمجة وإصلاح الأخطاء": (
+            "حلل الأكواد والأخطاء بعناية. قدم كودًا كاملًا "
+            "عند الحاجة، واشرح مكان وضعه."
+        ),
+        "الترجمة": (
+            "ترجم النص بدقة وحافظ على المعنى والتنسيق."
+        ),
+        "التلخيص": (
+            "استخرج الأفكار الرئيسية وقدم ملخصًا منظمًا."
+        ),
+        "التحليل والبحث": (
+            "حلل المعلومات المتاحة، وميز بين الحقائق "
+            "والاستنتاجات. لا تدّعِ البحث المباشر في الويب."
+        ),
+        "التخطيط وتوليد الأفكار": (
+            "اقترح خطة عملية وخطوات واضحة."
+        ),
+    }
+
+    instruction = (
+        SYSTEM_INSTRUCTION
+        + "\nالمهمة: "
+        + task_instructions.get(task, task_instructions["مساعد عام"])
+        + "\nلغة الإجابة المطلوبة: "
+        + language
+    )
+
+    contents = []
+    for item in messages:
+        role = "model" if item["role"] == "assistant" else "user"
+        contents.append(
+            types.Content(
+                role=role,
+                parts=[types.Part.from_text(text=item["content"])],
+            )
         )
 
-        payload = {
-            "model": "gemini-3.8-flash",
-            "store": False,
-            "input": [
-                {"type": "text", "text": prompt_text},
-                {"type": "image", "mime_type": "image/jpeg", "data": image_data},
-            ],
-        }
+    last_error = None
 
-        translation = ""
-        last_error = ""
-
-        # محاولة الطلب حتى مرتين للتعامل مع الضغط اللحظي 503
-        for attempt in range(2):
-            response = requests.post(url, headers=headers, json=payload, timeout=60)
-            if response.ok:
-                result = response.json()
-                
-                # 1. الاستخراج من steps
-                if "steps" in result and isinstance(result["steps"], list):
-                    for step in result["steps"]:
-                        if step.get("type") == "model_output" and "content" in step:
-                            for content_item in step["content"]:
-                                if content_item.get("type") == "text" and "text" in content_item:
-                                    translation += content_item["text"] + "\n"
-
-                # 2. الاستخراج المباشر
-                if not translation and "output_text" in result and result["output_text"]:
-                    translation = result["output_text"]
-
-                # 3. الاستخراج من candidates
-                if not translation and "candidates" in result and len(result["candidates"]) > 0:
-                    try:
-                        parts = result["candidates"][0]["content"]["parts"]
-                        translation = "".join([p.get("text", "") for p in parts])
-                    except (KeyError, IndexError):
-                        pass
-
-                if translation.strip():
-                    return True, image, translation.strip(), file_obj.name
-            elif response.status_code in [503, 429]:
-                time.sleep(1.5)
-            else:
-                last_error = f"رمز الحالة: {response.status_code}"
-                break
-
-        return False, image, f"تعذر الترجمة: {last_error}", file_obj.name
-
-    except Exception as e:
-        return False, None, f"خطأ في المعالجة: {str(e)}", file_obj.name
-
-
-if uploaded_files:
-    st.info(f"تم رفع {len(uploaded_files)} صورة/صور.")
-
-    if st.button("🌐 ترجمة جميع الصور الآن", type="primary"):
+    for attempt in range(3):
         try:
-            api_key = st.secrets["GEMINI_API_KEY"]
+            response = client.models.generate_content(
+                model=MODEL_NAME,
+                contents=contents,
+                config=types.GenerateContentConfig(
+                    system_instruction=instruction,
+                    temperature=0.5,
+                    max_output_tokens=4096,
+                ),
+            )
 
-            with st.spinner(f"🚀 يجري ترجمة {len(uploaded_files)} صورة بشكل متوازٍ وسريع..."):
-                # استخدام ThreadPoolExecutor للاتصال المتوازي مع API
-                with ThreadPoolExecutor(max_workers=len(uploaded_files)) as executor:
-                    futures = [
-                        executor.submit(process_single_image, file_item, api_key)
-                        for file_item in uploaded_files
-                    ]
-                    results = [f.result() for f in futures]
-
-            st.success("✨ اكتملت الترجمة!")
-
-            full_combined_translation = ""
-
-            for idx, (success, img, text_result, filename) in enumerate(results, start=1):
-                st.markdown("---")
-                st.subheader(f"📄 الصفحات ({idx}/{len(results)}): {filename}")
-
-                col1, col2 = st.columns([1, 1])
-
-                with col1:
-                    if img:
-                        st.image(img, caption=filename, use_container_width=True)
-
-                with col2:
-                    if success:
-                        st.markdown("**📝 الترجمة:**")
-                        st.markdown(text_result)
-                        full_combined_translation += f"=== الصفحة {idx}: {filename} ===\n{text_result}\n\n"
-
-                        st.download_button(
-                            f"⬇️ تنزيل ترجمة هذه الصفحة",
-                            data=text_result,
-                            file_name=f"translation_page_{idx}.txt",
-                            mime="text/plain",
-                            key=f"dl_{idx}"
-                        )
-                    else:
-                        st.error(text_result)
-
-            if full_combined_translation:
-                st.markdown("---")
-                st.download_button(
-                    "📦 تنزيل جميع الترجمات في ملف واحد",
-                    data=full_combined_translation,
-                    file_name="all_manhwa_translations.txt",
-                    mime="text/plain",
-                    type="primary"
+            answer = response.text
+            if not answer or not answer.strip():
+                raise RuntimeError(
+                    "وصل رد فارغ من النموذج. جرّب صياغة الطلب مجددًا."
                 )
 
-        except KeyError:
-            st.error("لم يتم العثور على GEMINI_API_KEY في إعدادات Secrets.")
-        except Exception as error:
-            st.error("حدث خطأ غير متوقع.")
-            st.caption(str(error))
+            return answer.strip()
+
+        except Exception as exc:
+            last_error = exc
+            error_text = str(exc).lower()
+
+            retryable = any(
+                marker in error_text
+                for marker in (
+                    "503", "429", "500", "502",
+                    "504", "unavailable", "overloaded",
+                    "resource_exhausted", "timeout",
+                    "temporarily",
+                )
+            )
+
+            if retryable and attempt < 2:
+                time.sleep(2 ** (attempt + 1))
+                continue
+
+            break
+
+    error_text = str(last_error).lower()
+
+    if "429" in error_text or "resource_exhausted" in error_text:
+        message = (
+            "تم بلوغ حد الطلبات أو الحصة المتاحة. "
+            "انتظر قليلًا ثم أعد المحاولة."
+        )
+    elif any(code in error_text for code in ("503", "502", "504")):
+        message = (
+            "خدمة Gemini غير متاحة مؤقتًا. "
+            "أعد المحاولة بعد قليل."
+        )
+    elif "403" in error_text or "permission" in error_text:
+        message = (
+            "تعذر الوصول إلى الخدمة. تحقق من صلاحية المفتاح "
+            "وإعدادات المشروع والحصة المتاحة."
+        )
+    elif "401" in error_text or "api key" in error_text:
+        message = (
+            "تعذر التحقق من مفتاح API. تأكد من إضافته "
+            "في إعدادات Secrets."
+        )
+    else:
+        message = (
+            "حدث خطأ أثناء الاتصال بـ Gemini. "
+            "راجع سجلات التطبيق في منصة الاستضافة "
+            "وتحقق من إعدادات المفتاح."
+        )
+
+    raise RuntimeError(message) from last_error
+
+
+# -----------------------------
+# الواجهة
+# -----------------------------
+st.title("🤖 وكيل الذكاء الاصطناعي")
+st.caption("مساعد متعدد المهام يعمل عبر الإنترنت")
+
+with st.sidebar:
+    st.header("الإعدادات")
+
+    task = st.selectbox(
+        "نوع المهمة",
+        [
+            "مساعد عام",
+            "البرمجة وإصلاح الأخطاء",
+            "الترجمة",
+            "التلخيص",
+            "التحليل والبحث",
+            "التخطيط وتوليد الأفكار",
+        ],
+    )
+
+    language = st.selectbox(
+        "لغة الإجابة",
+        ["العربية", "إنجليزية", "فرنسية"],
+    )
+
+    st.caption(f"النموذج: {MODEL_NAME}")
+
+    if st.button("محادثة جديدة", use_container_width=True):
+        st.session_state.messages = []
+        st.rerun()
+
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+
+for message in st.session_state.messages:
+    with st.chat_message(message["role"]):
+        st.markdown(message["content"])
+
+prompt = st.chat_input("اكتب ما تريد من الوكيل...")
+
+if prompt:
+    api_key = get_api_key()
+
+    if not api_key:
+        st.error(
+            "لم يتم العثور على GEMINI_API_KEY. "
+            "أضفه إلى Secrets في إعدادات التطبيق."
+        )
+        st.stop()
+
+    st.session_state.messages.append(
+        {"role": "user", "content": prompt}
+    )
+
+    with st.chat_message("user"):
+        st.markdown(prompt)
+
+    with st.chat_message("assistant"):
+        try:
+            with st.spinner("يفكر الوكيل..."):
+                client = create_client(api_key)
+                answer = ask_gemini(
+                    client=client,
+                    messages=st.session_state.messages,
+                    task=task,
+                    language=language,
+                )
+
+            st.markdown(answer)
+            st.session_state.messages.append(
+                {"role": "assistant", "content": answer}
+            )
+
+        except Exception as exc:
+            st.error(str(exc))
