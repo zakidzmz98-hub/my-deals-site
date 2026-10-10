@@ -2,6 +2,10 @@
 import os
 import re
 import time
+import streamlit.components.v1 as components
+import json
+
+
 from urllib.parse import quote
 
 import streamlit as st
@@ -285,18 +289,82 @@ with project_tab:
             "ولا تستخدم كودًا غير موثوق."
         )
 
-        st.iframe(
-            preview_url,
-            height=600,
-            scrolling=True,
-        )
+     
+components.html(
+    st.session_state.project_html,
+    height=650,
+    scrolling=True,
+)
+
 
         st.markdown("### الكود المصدري")
 
-        st.code(
-            st.session_state.project_html,
-            language="html",
-        )
+      
+st.code(
+    st.session_state.project_html,
+    language="html",
+)
+
+components.html(
+    f"""
+    <button id="copy-code"
+        style="
+            background:#2563eb;
+            color:white;
+            border:0;
+            border-radius:8px;
+            padding:10px 18px;
+            font-size:15px;
+            cursor:pointer;
+        ">
+        📋 نسخ الكود كاملًا
+    </button>
+
+    <span id="copy-status"
+        style="margin-left:12px;font-size:14px;">
+    </span>
+
+    <script>
+    const code = {json.dumps(st.session_state.project_html)};
+
+    document.getElementById("copy-code").onclick = async () => {{
+        const status = document.getElementById("copy-status");
+
+        try {{
+            await navigator.clipboard.writeText(code);
+            status.textContent = "تم النسخ بنجاح ✓";
+            status.style.color = "green";
+        }} catch (error) {{
+            const area = document.createElement("textarea");
+            area.value = code;
+            area.style.position = "fixed";
+            area.style.left = "0";
+            area.style.top = "0";
+            document.body.appendChild(area);
+            area.select();
+
+            const copied = document.execCommand("copy");
+            area.remove();
+
+            status.textContent = copied
+                ? "تم النسخ بنجاح ✓"
+                : "تعذر النسخ. استخدم زر النسخ في مربع الكود.";
+        }}
+    }};
+    </script>
+    """,
+    height=65,
+    scrolling=False,
+)
+
+st.download_button(
+    "⬇️ تنزيل المشروع بصيغة HTML",
+    data=st.session_state.project_html,
+    file_name="my_ai_project.html",
+    mime="text/html",
+    use_container_width=True,
+)
+
 
         st.download_button(
             "تنزيل المشروع بصيغة HTML",
