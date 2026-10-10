@@ -65,12 +65,14 @@ def extract_html(answer):
 # -----------------------------
 def ask_gemini(prompt, history="", use_search=False):
     full_input = ""
+
     if history:
         full_input += (
-            "هذه أجزاء من المحادثة السابقة للاستفادة منها:\n"
+            "المحادثة السابقة:\n"
             + history
             + "\n\n"
         )
+
     full_input += prompt
 
     arguments = {
@@ -87,11 +89,44 @@ def ask_gemini(prompt, history="", use_search=False):
         ]
 
     response = client.interactions.create(**arguments)
+
     answer = getattr(response, "output_text", None)
 
     if not answer:
-        return "لم يرجع النموذج نصًا. حاول مرة أخرى."
+        answer = "لم يرجع النموذج نصًا. حاول مرة أخرى."
 
+    sources = []
+    seen_urls = set()
+
+    for step in getattr(response, "steps", []) or []:
+        if getattr(step, "type", "") != "model_output":
+            continue
+
+        for block in getattr(step, "content", []) or []:
+            if getattr(block, "type", "") != "text":
+                continue
+
+            for citation in (
+                getattr(block, "annotations", []) or []
+            ):
+                if getattr(citation, "type", "") != "url_citation":
+                    continue
+
+                url = getattr(citation, "url", "")
+                title = getattr(citation, "title", "") or "المصدر"
+
+                if url.startswith(("https://", "http://")):
+                    if url not in seen_urls:
+                        seen_urls.add(url)
+                        sources.append((title, url))
+
+    if use_search and sources:
+        answer += "\n\n### 🔎 المصادر\n"
+
+        for title, url in sources:
+            answer += f"- [{title}]({url})\n"
+
+    return answer
     return answer
 
 # -----------------------------
