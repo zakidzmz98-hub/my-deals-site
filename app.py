@@ -14,7 +14,8 @@ st.set_page_config(
     layout="centered",
 )
 
-MODEL_NAME = "gemini-2.5-flash"
+# تحديث اسم الموديل إلى الإصدار المطلوب
+MODEL_NAME = "gemini-3.8-flash"
 
 SYSTEM_INSTRUCTION = """
 أنت وكيل ذكاء اصطناعي متعدد المهام.
@@ -149,7 +150,6 @@ def ask_gemini(client, messages, task, language):
             "في إعدادات Secrets."
         )
     else:
-        # إضافة تفاصيل الخطأ الفعلي لتسهيل التشخيص
         details = f"{type(last_error).__name__}: {last_error}"
         message = (
             f"حدث خطأ أثناء الاتصال بـ Gemini.\n"
