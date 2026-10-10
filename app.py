@@ -14,7 +14,6 @@ st.set_page_config(
     layout="centered",
 )
 
-# استخدام اسم الموديل المستقر الموصى به
 MODEL_NAME = "gemini-2.5-flash"
 
 SYSTEM_INSTRUCTION = """
@@ -150,18 +149,19 @@ def ask_gemini(client, messages, task, language):
             "في إعدادات Secrets."
         )
     else:
+        # إضافة تفاصيل الخطأ الفعلي لتسهيل التشخيص
+        details = f"{type(last_error).__name__}: {last_error}"
         message = (
-            "حدث خطأ أثناء الاتصال بـ Gemini. "
-            "راجع سجلات التطبيق في منصة الاستضافة "
-            "وتحقق من إعدادات المفتاح."
+            f"حدث خطأ أثناء الاتصال بـ Gemini.\n"
+            f"التفاصيل التقنية: {details}\n"
+            "تحقق من إعدادات المفتاح واسم الموديل."
         )
 
- details = f"{type(last_error).__name__}: {last_error}"
-raise RuntimeError(f"{message}\nالتفاصيل التقنية: {details}") from last_error
+    raise RuntimeError(message) from last_error
 
 
 # -----------------------------
-# الواجهة
+# واجهة التطبيق
 # -----------------------------
 st.title("🤖 وكيل الذكاء الاصطناعي")
 st.caption("مساعد متعدد المهام يعمل عبر الإنترنت")
@@ -183,7 +183,7 @@ with st.sidebar:
 
     language = st.selectbox(
         "لغة الإجابة",
-        ["العربية", "إنجليزية", "فرنسية"],
+        ["العربية", "الإنجليزية", "الفرنسية"],
     )
 
     st.caption(f"النموذج: {MODEL_NAME}")
