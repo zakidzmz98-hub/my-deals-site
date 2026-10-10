@@ -1,35 +1,32 @@
+
 import os
+import re
 import time
+from urllib.parse import quote
 
 import streamlit as st
 from google import genai
-from google.genai import types
 
-# -----------------------------
-# إعدادات التطبيق
-# -----------------------------
+
+# ---------------------------------
+# إعداد التطبيق
+# ---------------------------------
 st.set_page_config(
-    page_title="وكيل الذكاء الاصطناعي",
+    page_title="Gemini AI Agent",
     page_icon="🤖",
-    layout="centered",
+    layout="wide",
 )
 
-# تحديث اسم الموديل إلى الإصدار المطلوب
 MODEL_NAME = "gemini-3.8-flash"
 
-SYSTEM_INSTRUCTION = """
-أنت وكيل ذكاء اصطناعي متعدد المهام.
-أجب باللغة التي يحددها المستخدم.
-ساعد في البرمجة، والتفسير، والترجمة، والتلخيص،
-والتخطيط، وتحليل النصوص وتوليد الأفكار.
-كن واضحًا ودقيقًا، ولا تدّعِ أنك نفذت مهمة
-خارج المحادثة أو أنك بحثت في الإنترنت إذا لم تفعل ذلك.
-إذا كان الطلب غير واضح، فاطلب توضيحًا مناسبًا.
-"""
+st.title("🤖 وكيل Gemini الذكي")
+st.caption("محادثة، إنشاء مشاريع، ومعاينة مباشرة")
 
 
+# ---------------------------------
+# إعداد مفتاح API
+# ---------------------------------
 def get_api_key():
-    """قراءة المفتاح من أسرار Streamlit أو متغير البيئة."""
     try:
         key = st.secrets.get("GEMINI_API_KEY", "")
         if key:
@@ -40,199 +37,278 @@ def get_api_key():
     return os.environ.get("GEMINI_API_KEY", "").strip()
 
 
-def create_client(api_key):
-    return genai.Client(api_key=api_key)
+# ---------------------------------
+# الاتصال بـ Gemini
+# ---------------------------------
+def call_gemini(prompt, mode, history):
+    api_key = get_api_key()
 
-
-def ask_gemini(client, messages, task, language):
-    """إرسال سياق المحادثة إلى Gemini مع إعادة محاولة محدودة."""
-    task_instructions = {
-        "مساعد عام": "ساعد المستخدم في المهمة التي يطلبها.",
-        "البرمجة وإصلاح الأخطاء": (
-            "حلل الأكواد والأخطاء بعناية. قدم كودًا كاملًا "
-            "عند الحاجة، واشرح مكان وضعه."
-        ),
-        "الترجمة": (
-            "ترجم النص بدقة وحافظ على المعنى والتنسيق."
-        ),
-        "التلخيص": (
-            "استخرج الأفكار الرئيسية وقدم ملخصًا منظمًا."
-        ),
-        "التحليل والبحث": (
-            "حلل المعلومات المتاحة، وميز بين الحقائق "
-            "والاستنتاجات. لا تدّعِ البحث المباشر في الويب."
-        ),
-        "التخطيط وتوليد الأفكار": (
-            "اقترح خطة عملية وخطوات واضحة."
-        ),
-    }
-
-    instruction = (
-        SYSTEM_INSTRUCTION
-        + "\nالمهمة: "
-        + task_instructions.get(task, task_instructions["مساعد عام"])
-        + "\nلغة الإجابة المطلوبة: "
-        + language
-    )
-
-    contents = []
-    for item in messages:
-        role = "model" if item["role"] == "assistant" else "user"
-        contents.append(
-            types.Content(
-                role=role,
-                parts=[types.Part.from_text(text=item["content"])],
-            )
+    if not api_key:
+        raise RuntimeError(
+            "لم يتم العثور على GEMINI_API_KEY. "
+            "أضفه في إعدادات Secrets في Streamlit."
         )
+
+    client = genai.Client(api_key=api_key)
+
+    if mode == "إنشاء مشروع":
+        instructions = """
+أنت مطور ويب خبير.
+أنشئ مشروعًا كاملًا ذاتيًا في ملف HTML واحد.
+يجب أن يحتوي الملف على HTML وCSS وJavaScript عند الحاجة.
+اجعل الواجهة جميلة ومتجاوبة مع الهاتف والحاسوب.
+في الألعاب، أضف طريقة لعب واضحة وأزرارًا قابلة للاستخدام.
+لا تستخدم مكتبات خارجية أو صورًا خارجية إلا عند الضرورة.
+استخدم رسومات CSS أو SVG داخلية عندما يكون ذلك مناسبًا.
+أعد ملف HTML فقط، دون Markdown أو شروحات خارجه.
+لا تضع أسرارًا أو مفاتيح API داخل الملف.
+"""
+    else:
+        instructions = """
+أنت وكيل ذكاء اصطناعي مساعد.
+ساعد المستخدم في البرمجة والترجمة والتلخيص والتخطيط
+وتحليل المعلومات. كن واضحًا وصريحًا بشأن ما تستطيع فعله.
+لا تدّعِ أنك فتحت متصفحًا أو نفذت إجراءً لم تنفذه.
+أجب باللغة المناسبة لطلب المستخدم.
+"""
+
+    transcript = []
+    for item in history[-12:]:
+        role = "المستخدم" if item["role"] == "user" else "المساعد"
+        transcript.append(f"{role}: {item['content']}")
+
+    full_input = (
+        instructions
+        + "\n\nسجل المحادثة:\n"
+        + "\n\n".join(transcript)
+        + "\n\nطلب المستخدم الحالي:\n"
+        + prompt
+    )
 
     last_error = None
 
     for attempt in range(3):
         try:
-            response = client.models.generate_content(
+            result = client.interactions.create(
                 model=MODEL_NAME,
-                contents=contents,
-                config=types.GenerateContentConfig(
-                    system_instruction=instruction,
-                    temperature=0.5,
-                    max_output_tokens=4096,
-                ),
+                input=full_input,
+                generation_config={"thinking_level": "low"},
             )
 
-            answer = response.text
+            answer = result.output_text
+
             if not answer or not answer.strip():
-                raise RuntimeError(
-                    "وصل رد فارغ من النموذج. جرّب صياغة الطلب مجددًا."
-                )
+                raise RuntimeError("أعاد النموذج إجابة فارغة.")
 
             return answer.strip()
 
         except Exception as exc:
             last_error = exc
-            error_text = str(exc).lower()
+            error = str(exc).lower()
 
-            retryable = any(
-                marker in error_text
-                for marker in (
-                    "503", "429", "500", "502",
-                    "504", "unavailable", "overloaded",
-                    "resource_exhausted", "timeout",
-                    "temporarily",
+            temporary = any(
+                token in error
+                for token in (
+                    "429", "500", "502", "503", "504",
+                    "timeout", "unavailable", "overloaded",
                 )
             )
 
-            if retryable and attempt < 2:
+            if temporary and attempt < 2:
                 time.sleep(2 ** (attempt + 1))
                 continue
 
             break
 
-    error_text = str(last_error).lower()
-
-    if "429" in error_text or "resource_exhausted" in error_text:
-        message = (
-            "تم بلوغ حد الطلبات أو الحصة المتاحة. "
-            "انتظر قليلًا ثم أعد المحاولة."
-        )
-    elif any(code in error_text for code in ("503", "502", "504")):
-        message = (
-            "خدمة Gemini غير متاحة مؤقتًا. "
-            "أعد المحاولة بعد قليل."
-        )
-    elif "403" in error_text or "permission" in error_text:
-        message = (
-            "تعذر الوصول إلى الخدمة. تحقق من صلاحية المفتاح "
-            "وإعدادات المشروع والحصة المتاحة."
-        )
-    elif "401" in error_text or "api key" in error_text:
-        message = (
-            "تعذر التحقق من مفتاح API. تأكد من إضافته "
-            "في إعدادات Secrets."
-        )
-    else:
-        details = f"{type(last_error).__name__}: {last_error}"
-        message = (
-            f"حدث خطأ أثناء الاتصال بـ Gemini.\n"
-            f"التفاصيل التقنية: {details}\n"
-            "تحقق من إعدادات المفتاح واسم الموديل."
-        )
-
-    raise RuntimeError(message) from last_error
+    raise RuntimeError(
+        f"تعذر الاتصال بـ Gemini: "
+        f"{type(last_error).__name__}: {last_error}"
+    ) from last_error
 
 
-# -----------------------------
-# واجهة التطبيق
-# -----------------------------
-st.title("🤖 وكيل الذكاء الاصطناعي")
-st.caption("مساعد متعدد المهام يعمل عبر الإنترنت")
-
-with st.sidebar:
-    st.header("الإعدادات")
-
-    task = st.selectbox(
-        "نوع المهمة",
-        [
-            "مساعد عام",
-            "البرمجة وإصلاح الأخطاء",
-            "الترجمة",
-            "التلخيص",
-            "التحليل والبحث",
-            "التخطيط وتوليد الأفكار",
-        ],
+# ---------------------------------
+# استخراج HTML من الإجابة
+# ---------------------------------
+def extract_html(answer):
+    match = re.search(
+        r"```(?:html)?\s*(.*?)```",
+        answer,
+        flags=re.IGNORECASE | re.DOTALL,
     )
 
-    language = st.selectbox(
-        "لغة الإجابة",
-        ["العربية", "الإنجليزية", "الفرنسية"],
+    html = match.group(1).strip() if match else answer.strip()
+
+    start = html.lower().find("<!doctype html")
+    if start == -1:
+        start = html.lower().find("<html")
+
+    if start > 0:
+        html = html[start:]
+
+    if "<html" not in html.lower():
+        raise ValueError(
+            "لم يُنشئ النموذج ملف HTML صالحًا. "
+            "أعد المحاولة واطلب منه إنشاء المشروع في ملف HTML واحد."
+        )
+
+    return html
+
+
+# ---------------------------------
+# الحالة
+# ---------------------------------
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+
+if "project_html" not in st.session_state:
+    st.session_state.project_html = ""
+
+if "project_prompt" not in st.session_state:
+    st.session_state.project_prompt = ""
+
+
+# ---------------------------------
+# الشريط الجانبي
+# ---------------------------------
+with st.sidebar:
+    st.header("إعدادات الوكيل")
+
+    mode = st.radio(
+        "ماذا تريد أن يفعل الوكيل؟",
+        ["محادثة", "إنشاء مشروع"],
     )
 
     st.caption(f"النموذج: {MODEL_NAME}")
 
-    if st.button("محادثة جديدة", use_container_width=True):
+    if st.button("بدء محادثة جديدة", use_container_width=True):
         st.session_state.messages = []
         st.rerun()
 
-if "messages" not in st.session_state:
-    st.session_state.messages = []
+    if st.button("مسح المشروع الحالي", use_container_width=True):
+        st.session_state.project_html = ""
+        st.session_state.project_prompt = ""
+        st.rerun()
 
-for message in st.session_state.messages:
-    with st.chat_message(message["role"]):
-        st.markdown(message["content"])
 
-prompt = st.chat_input("اكتب ما تريد من الوكيل...")
+# ---------------------------------
+# الواجهة الرئيسية
+# ---------------------------------
+chat_tab, project_tab = st.tabs(
+    ["💬 المحادثة", "🛠️ مساحة المشاريع"]
+)
 
-if prompt:
-    api_key = get_api_key()
+with chat_tab:
+    for item in st.session_state.messages:
+        with st.chat_message(item["role"]):
+            st.markdown(item["content"])
 
-    if not api_key:
-        st.error(
-            "لم يتم العثور على GEMINI_API_KEY. "
-            "أضفه إلى Secrets في إعدادات التطبيق."
-        )
-        st.stop()
-
-    st.session_state.messages.append(
-        {"role": "user", "content": prompt}
+    prompt = st.chat_input(
+        "مثال: اشرح لي كيف تعمل لعبة الديناصور..."
     )
 
-    with st.chat_message("user"):
-        st.markdown(prompt)
+    if prompt:
+        st.session_state.messages.append(
+            {"role": "user", "content": prompt}
+        )
 
-    with st.chat_message("assistant"):
-        try:
-            with st.spinner("يفكر الوكيل..."):
-                client = create_client(api_key)
-                answer = ask_gemini(
-                    client=client,
-                    messages=st.session_state.messages,
-                    task=task,
-                    language=language,
+        with st.chat_message("user"):
+            st.markdown(prompt)
+
+        with st.chat_message("assistant"):
+            try:
+                with st.status(
+                    "يعمل الوكيل على طلبك...",
+                    expanded=True,
+                ) as status:
+                    st.write("1. تجهيز الطلب وسياق المحادثة")
+
+                    answer = call_gemini(
+                        prompt=prompt,
+                        mode=mode,
+                        history=st.session_state.messages,
+                    )
+
+                    st.write("2. استلام النتيجة من Gemini")
+
+                    if mode == "إنشاء مشروع":
+                        st.write("3. تجهيز ملف المشروع للمعاينة")
+                        html = extract_html(answer)
+
+                        st.session_state.project_html = html
+                        st.session_state.project_prompt = prompt
+
+                        answer = (
+                            "تم إنشاء ملف المشروع. "
+                            "افتح تبويب «مساحة المشاريع» "
+                            "لمعاينته وتنزيل الكود."
+                        )
+
+                    status.update(
+                        label="اكتملت المهمة",
+                        state="complete",
+                        expanded=False,
+                    )
+
+                st.markdown(answer)
+
+                st.session_state.messages.append(
+                    {"role": "assistant", "content": answer}
                 )
 
-            st.markdown(answer)
-            st.session_state.messages.append(
-                {"role": "assistant", "content": answer}
-            )
+            except Exception as exc:
+                st.error(str(exc))
 
-        except Exception as exc:
-            st.error(str(exc))
+
+with project_tab:
+    st.subheader("مساحة المشاريع")
+
+    st.write(
+        "اختر «إنشاء مشروع» من الشريط الجانبي، "
+        "ثم اطلب إنشاء لعبة أو صفحة ويب."
+    )
+
+    if st.session_state.project_html:
+        st.success(
+            f"المشروع الحالي: {st.session_state.project_prompt}"
+        )
+
+        preview_url = (
+            "data:text/html;charset=utf-8,"
+            + quote(st.session_state.project_html, safe="")
+        )
+
+        st.markdown("### معاينة المشروع")
+
+        st.warning(
+            "تُعرض المعاينة في إطار منفصل. "
+            "لا تدخل كلمات مرور أو أسرارًا في المشاريع المولدة، "
+            "ولا تستخدم كودًا غير موثوق."
+        )
+
+        st.iframe(
+            preview_url,
+            height=600,
+            scrolling=True,
+        )
+
+        st.markdown("### الكود المصدري")
+
+        st.code(
+            st.session_state.project_html,
+            language="html",
+        )
+
+        st.download_button(
+            "تنزيل المشروع بصيغة HTML",
+            data=st.session_state.project_html,
+            file_name="my_ai_project.html",
+            mime="text/html",
+            use_container_width=True,
+        )
+
+    else:
+        st.info(
+            "لم يتم إنشاء مشروع بعد. "
+            "اختر «إنشاء مشروع» واطلب مثلًا: "
+            "اصنع لعبة ديناصور أستطيع لعبها."
+        )
